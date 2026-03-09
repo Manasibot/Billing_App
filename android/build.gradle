@@ -19,3 +19,18 @@ buildscript {
         classpath("com.facebook.react:react-native-gradle-plugin")
     }
 }
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            project.android {
+                if (it.hasProperty('kotlinOptions')) {
+                    kotlinOptions {
+                        jvmTarget = '11'
+                    }
+                }
+            }
+        }
+    }
+}
+
