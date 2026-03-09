@@ -41,6 +41,27 @@ const BillItem: React.FC<BillItemProps> = ({ bill, onEdit, onDelete }) => {
             return '—';
         }
     };
+     const calculateDaysCount = () => {
+        if (!bill.billDate) return '—';
+        
+        try {
+            const billDate = bill.billDate?.toDate ? bill.billDate.toDate() : new Date(bill.billDate);
+            const today = new Date();
+            
+            // Reset time part
+            billDate.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+            
+            const diffTime = today.getTime() - billDate.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            
+            return diffDays;
+        } catch {
+            return '—';
+        }
+    };
+
+    const daysCount = calculateDaysCount();
 
     const formatAmount = (amount: number) =>
         amount.toLocaleString('en-IN', { minimumFractionDigits: 0 });
@@ -56,7 +77,7 @@ const BillItem: React.FC<BillItemProps> = ({ bill, onEdit, onDelete }) => {
                 {/* Days Badge */}
                 <View style={[styles.daysBadge, isPaid && styles.daysBadgePaid]}>
                     <Text style={[styles.daysNum, isPaid && styles.daysNumPaid]}>
-                        {bill.daysCount ?? '—'}
+                        {daysCount}
                     </Text>
                     <Text style={[styles.daysLabel, isPaid && styles.daysLabelPaid]}>days</Text>
                 </View>

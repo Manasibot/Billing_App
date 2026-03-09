@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
     View,
     FlatList,
@@ -8,6 +8,7 @@ import {
     TouchableOpacity,
     Text,
     StatusBar,
+    Modal,
 } from 'react-native';
 import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -19,12 +20,117 @@ import LinearGradient from 'react-native-linear-gradient';
 // Icon imports as specified
 import IonIcon from 'react-native-vector-icons/Ionicons';
 import EntypoIcon from 'react-native-vector-icons/Entypo';
+import MaterialIcon from 'react-native-vector-icons/MaterialIcons';
+
+// Filter types
+type FilterType = 'all' | 'unpaid' | 'paid' | 'overdue' | 'today' | 'week' | 'month';
+type SortType = 'daysDesc' | 'daysAsc' | 'amountDesc' | 'amountAsc' | 'partyAsc' | 'partyDesc';
+
+interface FilterState {
+    type: FilterType;
+    sort: SortType;
+    minAmount: number | null;
+    maxAmount: number | null;
+}
 
 const BillListScreen = () => {
     const [bills, setBills] = useState<Bill[]>([]);
+    const [filteredBills, setFilteredBills] = useState<Bill[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
+    const [filterModalVisible, setFilterModalVisible] = useState(false);
     const [editingBill, setEditingBill] = useState<Bill | null>(null);
+
+    // Filter state
+    const [filters, setFilters] = useState<FilterState>({
+        type: 'all',
+        sort: 'daysDesc',
+        minAmount: null,
+        maxAmount: null,
+    });
+
+    // Helper function to calculate days count
+    const calculateDaysCount = (billDate: any): number => {
+        if (!billDate) return 0;
+
+        try {
+            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+            const today = new Date();
+
+            date.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+
+            const diffTime = today.getTime() - date.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            return diffDays > 0 ? diffDays : 0;
+        } catch (error) {
+            console.error('Error calculating days count:', error);
+            return 0;
+        }
+    };
+
+    // Check if bill is overdue (more than 30 days)
+    const isOverdue = (daysCount: number): boolean => {
+        return daysCount > 30;
+    };
+
+    // Check if bill is due today
+    const isDueToday = (billDate: any): boolean => {
+        if (!billDate) return false;
+
+        try {
+            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+            const today = new Date();
+
+            date.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+
+            return date.getTime() === today.getTime();
+        } catch (error) {
+            return false;
+        }
+    };
+
+    // Check if bill is due this week
+    const isDueThisWeek = (billDate: any): boolean => {
+        if (!billDate) return false;
+
+        try {
+            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+            const today = new Date();
+            const weekLater = new Date(today);
+            weekLater.setDate(today.getDate() + 7);
+
+            date.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+            weekLater.setHours(0, 0, 0, 0);
+
+            return date >= today && date <= weekLater;
+        } catch (error) {
+            return false;
+        }
+    };
+
+    // Check if bill is due this month
+    const isDueThisMonth = (billDate: any): boolean => {
+        if (!billDate) return false;
+
+        try {
+            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+            const today = new Date();
+            const monthLater = new Date(today);
+            monthLater.setMonth(today.getMonth() + 1);
+
+            date.setHours(0, 0, 0, 0);
+            today.setHours(0, 0, 0, 0);
+            monthLater.setHours(0, 0, 0, 0);
+
+            return date >= today && date <= monthLater;
+        } catch (error) {
+            return false;
+        }
+    };
 
     useEffect(() => {
         const q = query(collection(db, 'bills'), orderBy('createdAt', 'desc'));
@@ -32,16 +138,18 @@ const BillListScreen = () => {
             q,
             (querySnapshot) => {
                 const billsData: Bill[] = [];
+
                 querySnapshot.forEach((docSnap) => {
-                    billsData.push({ id: docSnap.id, ...docSnap.data() } as Bill);
+                    const data = docSnap.data();
+                    const daysCount = calculateDaysCount(data.billDate);
+
+                    billsData.push({
+                        id: docSnap.id,
+                        ...data,
+                        daysCount
+                    } as Bill);
                 });
-                // Sort: unpaid first (by daysCount desc), paid last (by daysCount desc)
-                billsData.sort((a, b) => {
-                    const aPaid = a.pendingAmount <= 0 ? 1 : 0;
-                    const bPaid = b.pendingAmount <= 0 ? 1 : 0;
-                    if (aPaid !== bPaid) return aPaid - bPaid; // unpaid first
-                    return (b.daysCount || 0) - (a.daysCount || 0); // then by days desc
-                });
+
                 setBills(billsData);
                 setLoading(false);
             },
@@ -54,6 +162,75 @@ const BillListScreen = () => {
 
         return () => unsubscribe();
     }, []);
+
+    // Apply filters and sorting
+    useEffect(() => {
+
+        let filtered = [...bills];
+
+        // Apply filter type
+        switch (filters.type) {
+            case 'unpaid':
+                filtered = filtered.filter(bill => bill.pendingAmount > 0);
+                break;
+            case 'paid':
+                filtered = filtered.filter(bill => bill.pendingAmount <= 0);
+                break;
+            case 'overdue':
+                filtered = filtered.filter(bill =>
+                    bill.pendingAmount > 0 && isOverdue(bill.daysCount || 0)
+                );
+                break;
+            case 'today':
+                filtered = filtered.filter(bill =>
+                    bill.pendingAmount > 0 && isDueToday(bill.billDate)
+                );
+                break;
+            case 'week':
+                filtered = filtered.filter(bill =>
+                    bill.pendingAmount > 0 && isDueThisWeek(bill.billDate)
+                );
+                break;
+            case 'month':
+                filtered = filtered.filter(bill =>
+                    bill.pendingAmount > 0 && isDueThisMonth(bill.billDate)
+                );
+                break;
+            default:
+                // 'all' - no filter
+                break;
+        }
+
+        // Apply amount range filter
+        if (filters.minAmount !== null) {
+            filtered = filtered.filter(bill => bill.pendingAmount >= filters.minAmount!);
+        }
+        if (filters.maxAmount !== null) {
+            filtered = filtered.filter(bill => bill.pendingAmount <= filters.maxAmount!);
+        }
+
+        // Apply sorting
+        filtered.sort((a, b) => {
+            switch (filters.sort) {
+                case 'daysDesc':
+                    return (b.daysCount || 0) - (a.daysCount || 0);
+                case 'daysAsc':
+                    return (a.daysCount || 0) - (b.daysCount || 0);
+                case 'amountDesc':
+                    return (b.pendingAmount || 0) - (a.pendingAmount || 0);
+                case 'amountAsc':
+                    return (a.pendingAmount || 0) - (b.pendingAmount || 0);
+                case 'partyAsc':
+                    return (a.partyName || '').localeCompare(b.partyName || '');
+                case 'partyDesc':
+                    return (b.partyName || '').localeCompare(a.partyName || '');
+                default:
+                    return 0;
+            }
+        });
+
+        setFilteredBills(filtered);
+    }, [bills, filters]);
 
     const handleAddBill = async (billData: Omit<Bill, 'id'>) => {
         try {
@@ -111,6 +288,157 @@ const BillListScreen = () => {
         setModalVisible(true);
     };
 
+    const clearFilters = () => {
+        setFilters({
+            type: 'all',
+            sort: 'daysDesc',
+            minAmount: null,
+            maxAmount: null,
+        });
+    };
+
+    const getActiveFilterCount = (): number => {
+        let count = 0;
+        if (filters.type !== 'all') count++;
+        if (filters.sort !== 'daysDesc') count++;
+        if (filters.minAmount !== null) count++;
+        if (filters.maxAmount !== null) count++;
+        return count;
+    };
+
+    const FilterModal = () => (
+        <Modal
+            animationType="slide"
+            transparent={true}
+            visible={filterModalVisible}
+            onRequestClose={() => setFilterModalVisible(false)}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                    <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Filters & Sorting</Text>
+                        <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                            <IonIcon name="close" size={24} color="#FFA4A4" />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Filter by Status */}
+                    <Text style={styles.filterSectionTitle}>Bill Status</Text>
+                    <View style={styles.filterOptions}>
+                        {[
+                            { value: 'all', label: 'All Bills', icon: 'list' },
+                            { value: 'unpaid', label: 'Unpaid Only', icon: 'hourglass-outline' },
+                            { value: 'paid', label: 'Paid Only', icon: 'checkmark-done-outline' },
+                            { value: 'overdue', label: 'Overdue (>30 days)', icon: 'alert-circle-outline' },
+                        ].map((option) => (
+                            <TouchableOpacity
+                                key={option.value}
+                                style={[
+                                    styles.filterChip,
+                                    filters.type === option.value && styles.filterChipActive
+                                ]}
+                                onPress={() => setFilters({ ...filters, type: option.value as FilterType })}
+                            >
+                                <IonIcon
+                                    name={option.icon}
+                                    size={16}
+                                    color={filters.type === option.value ? '#fff' : '#FFA4A4'}
+                                />
+                                <Text style={[
+                                    styles.filterChipText,
+                                    filters.type === option.value && styles.filterChipTextActive
+                                ]}>
+                                    {option.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {/* Due Date Filters */}
+                    {/* <Text style={styles.filterSectionTitle}>Due Date</Text>
+                    <View style={styles.filterOptions}>
+                        {[
+                            { value: 'today', label: 'Today', icon: 'today-outline' },
+                            { value: 'week', label: 'This Week', icon: 'calendar-outline' },
+                            { value: 'month', label: 'This Month', icon: 'calendar-outline' },
+                        ].map((option) => (
+                            <TouchableOpacity
+                                key={option.value}
+                                style={[
+                                    styles.filterChip,
+                                    filters.type === option.value && styles.filterChipActive
+                                ]}
+                                onPress={() => setFilters({...filters, type: option.value as FilterType})}
+                            >
+                                <IonIcon 
+                                    name={option.icon} 
+                                    size={16} 
+                                    color={filters.type === option.value ? '#fff' : '#FFA4A4'} 
+                                />
+                                <Text style={[
+                                    styles.filterChipText,
+                                    filters.type === option.value && styles.filterChipTextActive
+                                ]}>
+                                    {option.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View> */}
+
+                    {/* Sort By */}
+                    <Text style={styles.filterSectionTitle}>Sort By</Text>
+                    <View style={styles.filterOptions}>
+                        {[
+                            { value: 'daysDesc', label: 'Days (High to Low)', icon: 'arrow-down' },
+                            { value: 'daysAsc', label: 'Days (Low to High)', icon: 'arrow-up' },
+                            { value: 'amountDesc', label: 'Amount (High to Low)', icon: 'arrow-down' },
+                            { value: 'amountAsc', label: 'Amount (Low to High)', icon: 'arrow-up' },
+                            { value: 'partyAsc', label: 'Party Name (A-Z)', icon: 'arrow-up' },
+                            { value: 'partyDesc', label: 'Party Name (Z-A)', icon: 'arrow-down' },
+                        ].map((option) => (
+                            <TouchableOpacity
+                                key={option.value}
+                                style={[
+                                    styles.filterChip,
+                                    filters.sort === option.value && styles.filterChipActive
+                                ]}
+                                onPress={() => setFilters({ ...filters, sort: option.value as SortType })}
+                            >
+                                <IonIcon
+                                    name={option.icon === 'arrow-up' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                                    size={16}
+                                    color={filters.sort === option.value ? '#fff' : '#FFA4A4'}
+                                />
+                                <Text style={[
+                                    styles.filterChipText,
+                                    filters.sort === option.value && styles.filterChipTextActive
+                                ]}>
+                                    {option.label}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {/* Action Buttons */}
+                    <View style={styles.modalActions}>
+                        <TouchableOpacity
+                            style={styles.clearButton}
+                            onPress={clearFilters}
+                        >
+                            <Text style={styles.clearButtonText}>Clear All</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={styles.applyButton}
+                            onPress={() => setFilterModalVisible(false)}
+                        >
+                            <Text style={styles.applyButtonText}>Apply Filters</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </View>
+        </Modal>
+    );
+
     if (loading) {
         return (
             <LinearGradient colors={['#FCF9EA', '#BADFDB']} style={styles.center}>
@@ -126,10 +454,30 @@ const BillListScreen = () => {
                 {/* Header */}
                 <View style={styles.header}>
                     <Text style={styles.headerTitle}>My Bills</Text>
-                    <TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={() => setFilterModalVisible(true)}
+                        style={styles.filterButton}
+                    >
                         <IonIcon name="funnel-outline" size={24} color="#FFA4A4" />
+                        {getActiveFilterCount() > 0 && (
+                            <View style={styles.filterBadge}>
+                                <Text style={styles.filterBadgeText}>{getActiveFilterCount()}</Text>
+                            </View>
+                        )}
                     </TouchableOpacity>
                 </View>
+
+                {/* Active Filters Display */}
+                {getActiveFilterCount() > 0 && (
+                    <View style={styles.activeFiltersContainer}>
+                        <Text style={styles.activeFiltersText}>
+                            {filters.type !== 'all' && `Status: ${filters.type} • `}
+                            {filters.sort !== 'daysDesc' && `Sort: ${filters.sort.replace(/([A-Z])/g, ' $1').toLowerCase()} • `}
+                            {filters.minAmount !== null && `Min: ₹${filters.minAmount} • `}
+                            {filters.maxAmount !== null && `Max: ₹${filters.maxAmount}`}
+                        </Text>
+                    </View>
+                )}
 
                 {/* Column Header Row */}
                 <View style={styles.tableHeader}>
@@ -138,14 +486,28 @@ const BillListScreen = () => {
                     <Text style={[styles.tableHeaderCell, { width: 90, textAlign: 'right' }]}>Pending</Text>
                 </View>
 
+                {/* Results count */}
+                <View style={styles.resultsContainer}>
+                    <Text style={styles.resultsText}>
+                        Showing {filteredBills.length} of {bills.length} bills
+                    </Text>
+                </View>
+
                 <FlatList
-                    data={bills}
+                    data={filteredBills}
                     keyExtractor={(item) => item.id || Math.random().toString()}
                     renderItem={({ item }) => (
                         <BillItem bill={item} onEdit={openEditModal} onDelete={confirmDelete} />
                     )}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <IonIcon name="document-text-outline" size={64} color="#FFA4A4" />
+                            <Text style={styles.emptyText}>No bills found</Text>
+                            <Text style={styles.emptySubtext}>Try adjusting your filters</Text>
+                        </View>
+                    }
                 />
 
                 {/* Floating Action Button */}
@@ -166,6 +528,8 @@ const BillListScreen = () => {
                     onSave={handleSave}
                     initialData={editingBill}
                 />
+
+                <FilterModal />
             </LinearGradient>
         </>
     );
@@ -194,6 +558,51 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         color: '#FFA4A4',
         letterSpacing: 0.5,
+    },
+    filterButton: {
+        position: 'relative',
+        padding: 4,
+    },
+    filterBadge: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        backgroundColor: '#FFA4A4',
+        borderRadius: 10,
+        minWidth: 20,
+        height: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1.5,
+        borderColor: '#FCF9EA',
+    },
+    filterBadgeText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: 'bold',
+    },
+    activeFiltersContainer: {
+        paddingHorizontal: 20,
+        paddingVertical: 6,
+        backgroundColor: 'rgba(255, 164, 164, 0.1)',
+        marginHorizontal: 16,
+        marginBottom: 8,
+        borderRadius: 8,
+    },
+    activeFiltersText: {
+        fontSize: 11,
+        color: '#FFA4A4',
+        fontWeight: '500',
+        textTransform: 'capitalize',
+    },
+    resultsContainer: {
+        paddingHorizontal: 20,
+        paddingVertical: 4,
+    },
+    resultsText: {
+        fontSize: 11,
+        color: '#666',
+        fontWeight: '400',
     },
     listContent: {
         paddingHorizontal: 16,
@@ -233,6 +642,117 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 4 },
         borderWidth: 2,
         borderColor: '#FCF9EA',
+    },
+    emptyContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 48,
+    },
+    emptyText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#FFA4A4',
+        marginTop: 12,
+    },
+    emptySubtext: {
+        fontSize: 13,
+        color: '#999',
+        marginTop: 4,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: '#FCF9EA',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: 20,
+        maxHeight: '80%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#BADFDB',
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        color: '#FFA4A4',
+    },
+    filterSectionTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#333',
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    filterOptions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    filterChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#FFA4A4',
+        gap: 6,
+    },
+    filterChipActive: {
+        backgroundColor: '#FFA4A4',
+    },
+    filterChipText: {
+        fontSize: 12,
+        color: '#FFA4A4',
+        fontWeight: '500',
+    },
+    filterChipTextActive: {
+        color: '#fff',
+    },
+    modalActions: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 24,
+        paddingTop: 16,
+        borderTopWidth: 1,
+        borderTopColor: '#BADFDB',
+    },
+    clearButton: {
+        flex: 1,
+        paddingVertical: 12,
+        alignItems: 'center',
+        marginRight: 8,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#FFA4A4',
+    },
+    clearButtonText: {
+        color: '#FFA4A4',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    applyButton: {
+        flex: 1,
+        paddingVertical: 12,
+        alignItems: 'center',
+        marginLeft: 8,
+        borderRadius: 8,
+        backgroundColor: '#FFA4A4',
+    },
+    applyButtonText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '600',
     },
 });
 
