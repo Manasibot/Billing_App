@@ -33,9 +33,91 @@ interface FilterState {
     maxAmount: number | null;
 }
 
+// Helper function to calculate days count
+const calculateDaysCount = (billDate: any): number => {
+    if (!billDate) return 0;
+
+    try {
+        const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+        const today = new Date();
+
+        date.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+
+        const diffTime = today.getTime() - date.getTime();
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+        return diffDays > 0 ? diffDays : 0;
+    } catch (error) {
+        console.error('Error calculating days count:', error);
+        return 0;
+    }
+};
+
+// Check if bill is overdue (more than 30 days)
+const isOverdue = (daysCount: number): boolean => {
+    return daysCount > 30;
+};
+
+// Check if bill is due today
+const isDueToday = (billDate: any): boolean => {
+    if (!billDate) return false;
+
+    try {
+        const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+        const today = new Date();
+
+        date.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+
+        return date.getTime() === today.getTime();
+    } catch (error) {
+        return false;
+    }
+};
+
+// Check if bill is due this week
+const isDueThisWeek = (billDate: any): boolean => {
+    if (!billDate) return false;
+
+    try {
+        const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+        const today = new Date();
+        const weekLater = new Date(today);
+        weekLater.setDate(today.getDate() + 7);
+
+        date.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        weekLater.setHours(0, 0, 0, 0);
+
+        return date >= today && date <= weekLater;
+    } catch (error) {
+        return false;
+    }
+};
+
+// Check if bill is due this month
+const isDueThisMonth = (billDate: any): boolean => {
+    if (!billDate) return false;
+
+    try {
+        const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
+        const today = new Date();
+        const monthLater = new Date(today);
+        monthLater.setMonth(today.getMonth() + 1);
+
+        date.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        monthLater.setHours(0, 0, 0, 0);
+
+        return date >= today && date <= monthLater;
+    } catch (error) {
+        return false;
+    }
+};
+
 const BillListScreen = () => {
     const [bills, setBills] = useState<Bill[]>([]);
-    const [filteredBills, setFilteredBills] = useState<Bill[]>([]);
     const [loading, setLoading] = useState(true);
     const [modalVisible, setModalVisible] = useState(false);
     const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -49,93 +131,12 @@ const BillListScreen = () => {
         maxAmount: null,
     });
 
-    // Helper function to calculate days count
-    const calculateDaysCount = (billDate: any): number => {
-        if (!billDate) return 0;
-
-        try {
-            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
-            const today = new Date();
-
-            date.setHours(0, 0, 0, 0);
-            today.setHours(0, 0, 0, 0);
-
-            const diffTime = today.getTime() - date.getTime();
-            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-            return diffDays > 0 ? diffDays : 0;
-        } catch (error) {
-            console.error('Error calculating days count:', error);
-            return 0;
-        }
-    };
-
-    // Check if bill is overdue (more than 30 days)
-    const isOverdue = (daysCount: number): boolean => {
-        return daysCount > 30;
-    };
-
-    // Check if bill is due today
-    const isDueToday = (billDate: any): boolean => {
-        if (!billDate) return false;
-
-        try {
-            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
-            const today = new Date();
-
-            date.setHours(0, 0, 0, 0);
-            today.setHours(0, 0, 0, 0);
-
-            return date.getTime() === today.getTime();
-        } catch (error) {
-            return false;
-        }
-    };
-
-    // Check if bill is due this week
-    const isDueThisWeek = (billDate: any): boolean => {
-        if (!billDate) return false;
-
-        try {
-            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
-            const today = new Date();
-            const weekLater = new Date(today);
-            weekLater.setDate(today.getDate() + 7);
-
-            date.setHours(0, 0, 0, 0);
-            today.setHours(0, 0, 0, 0);
-            weekLater.setHours(0, 0, 0, 0);
-
-            return date >= today && date <= weekLater;
-        } catch (error) {
-            return false;
-        }
-    };
-
-    // Check if bill is due this month
-    const isDueThisMonth = (billDate: any): boolean => {
-        if (!billDate) return false;
-
-        try {
-            const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
-            const today = new Date();
-            const monthLater = new Date(today);
-            monthLater.setMonth(today.getMonth() + 1);
-
-            date.setHours(0, 0, 0, 0);
-            today.setHours(0, 0, 0, 0);
-            monthLater.setHours(0, 0, 0, 0);
-
-            return date >= today && date <= monthLater;
-        } catch (error) {
-            return false;
-        }
-    };
-
     useEffect(() => {
         const q = query(collection(db, 'bills'), orderBy('createdAt', 'desc'));
+        // Added includeMetadataChanges to ensure local writes are visible immediately
         const unsubscribe = onSnapshot(
             q,
+            { includeMetadataChanges: true },
             (querySnapshot) => {
                 const billsData: Bill[] = [];
 
@@ -163,9 +164,8 @@ const BillListScreen = () => {
         return () => unsubscribe();
     }, []);
 
-    // Apply filters and sorting
-    useEffect(() => {
-
+    // Apply filters and sorting using useMemo to prevent flickering
+    const filteredBills = useMemo(() => {
         let filtered = [...bills];
 
         // Apply filter type
@@ -229,7 +229,7 @@ const BillListScreen = () => {
             }
         });
 
-        setFilteredBills(filtered);
+        return filtered;
     }, [bills, filters]);
 
     const handleAddBill = async (billData: Omit<Bill, 'id'>) => {
@@ -305,139 +305,6 @@ const BillListScreen = () => {
         if (filters.maxAmount !== null) count++;
         return count;
     };
-
-    const FilterModal = () => (
-        <Modal
-            animationType="slide"
-            transparent={true}
-            visible={filterModalVisible}
-            onRequestClose={() => setFilterModalVisible(false)}
-        >
-            <View style={styles.modalOverlay}>
-                <View style={styles.modalContent}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Filters & Sorting</Text>
-                        <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
-                            <IonIcon name="close" size={24} color="#FFA4A4" />
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Filter by Status */}
-                    <Text style={styles.filterSectionTitle}>Bill Status</Text>
-                    <View style={styles.filterOptions}>
-                        {[
-                            { value: 'all', label: 'All Bills', icon: 'list' },
-                            { value: 'unpaid', label: 'Unpaid Only', icon: 'hourglass-outline' },
-                            { value: 'paid', label: 'Paid Only', icon: 'checkmark-done-outline' },
-                            { value: 'overdue', label: 'Overdue (>30 days)', icon: 'alert-circle-outline' },
-                        ].map((option) => (
-                            <TouchableOpacity
-                                key={option.value}
-                                style={[
-                                    styles.filterChip,
-                                    filters.type === option.value && styles.filterChipActive
-                                ]}
-                                onPress={() => setFilters({ ...filters, type: option.value as FilterType })}
-                            >
-                                <IonIcon
-                                    name={option.icon}
-                                    size={16}
-                                    color={filters.type === option.value ? '#fff' : '#FFA4A4'}
-                                />
-                                <Text style={[
-                                    styles.filterChipText,
-                                    filters.type === option.value && styles.filterChipTextActive
-                                ]}>
-                                    {option.label}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    {/* Due Date Filters */}
-                    {/* <Text style={styles.filterSectionTitle}>Due Date</Text>
-                    <View style={styles.filterOptions}>
-                        {[
-                            { value: 'today', label: 'Today', icon: 'today-outline' },
-                            { value: 'week', label: 'This Week', icon: 'calendar-outline' },
-                            { value: 'month', label: 'This Month', icon: 'calendar-outline' },
-                        ].map((option) => (
-                            <TouchableOpacity
-                                key={option.value}
-                                style={[
-                                    styles.filterChip,
-                                    filters.type === option.value && styles.filterChipActive
-                                ]}
-                                onPress={() => setFilters({...filters, type: option.value as FilterType})}
-                            >
-                                <IonIcon 
-                                    name={option.icon} 
-                                    size={16} 
-                                    color={filters.type === option.value ? '#fff' : '#FFA4A4'} 
-                                />
-                                <Text style={[
-                                    styles.filterChipText,
-                                    filters.type === option.value && styles.filterChipTextActive
-                                ]}>
-                                    {option.label}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View> */}
-
-                    {/* Sort By */}
-                    <Text style={styles.filterSectionTitle}>Sort By</Text>
-                    <View style={styles.filterOptions}>
-                        {[
-                            { value: 'daysDesc', label: 'Days (High to Low)', icon: 'arrow-down' },
-                            { value: 'daysAsc', label: 'Days (Low to High)', icon: 'arrow-up' },
-                            { value: 'amountDesc', label: 'Amount (High to Low)', icon: 'arrow-down' },
-                            { value: 'amountAsc', label: 'Amount (Low to High)', icon: 'arrow-up' },
-                            { value: 'partyAsc', label: 'Party Name (A-Z)', icon: 'arrow-up' },
-                            { value: 'partyDesc', label: 'Party Name (Z-A)', icon: 'arrow-down' },
-                        ].map((option) => (
-                            <TouchableOpacity
-                                key={option.value}
-                                style={[
-                                    styles.filterChip,
-                                    filters.sort === option.value && styles.filterChipActive
-                                ]}
-                                onPress={() => setFilters({ ...filters, sort: option.value as SortType })}
-                            >
-                                <IonIcon
-                                    name={option.icon === 'arrow-up' ? 'arrow-up-outline' : 'arrow-down-outline'}
-                                    size={16}
-                                    color={filters.sort === option.value ? '#fff' : '#FFA4A4'}
-                                />
-                                <Text style={[
-                                    styles.filterChipText,
-                                    filters.sort === option.value && styles.filterChipTextActive
-                                ]}>
-                                    {option.label}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-
-                    {/* Action Buttons */}
-                    <View style={styles.modalActions}>
-                        <TouchableOpacity
-                            style={styles.clearButton}
-                            onPress={clearFilters}
-                        >
-                            <Text style={styles.clearButtonText}>Clear All</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.applyButton}
-                            onPress={() => setFilterModalVisible(false)}
-                        >
-                            <Text style={styles.applyButtonText}>Apply Filters</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </View>
-        </Modal>
-    );
 
     if (loading) {
         return (
@@ -529,11 +396,134 @@ const BillListScreen = () => {
                     initialData={editingBill}
                 />
 
-                <FilterModal />
+                <FilterModal 
+                    visible={filterModalVisible}
+                    onClose={() => setFilterModalVisible(false)}
+                    filters={filters}
+                    setFilters={setFilters}
+                    clearFilters={clearFilters}
+                />
             </LinearGradient>
         </>
     );
 };
+
+// Extracted FilterModal to a separate component to prevent re-mounting flicker
+interface FilterModalProps {
+    visible: boolean;
+    onClose: () => void;
+    filters: FilterState;
+    setFilters: (filters: FilterState) => void;
+    clearFilters: () => void;
+}
+
+const FilterModal: React.FC<FilterModalProps> = ({ 
+    visible, 
+    onClose, 
+    filters, 
+    setFilters, 
+    clearFilters 
+}) => (
+    <Modal
+        animationType="slide"
+        transparent={true}
+        visible={visible}
+        onRequestClose={onClose}
+    >
+        <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Filters & Sorting</Text>
+                    <TouchableOpacity onPress={onClose}>
+                        <IonIcon name="close" size={24} color="#FFA4A4" />
+                    </TouchableOpacity>
+                </View>
+
+                {/* Filter by Status */}
+                <Text style={styles.filterSectionTitle}>Bill Status</Text>
+                <View style={styles.filterOptions}>
+                    {[
+                        { value: 'all', label: 'All Bills', icon: 'list' },
+                        { value: 'unpaid', label: 'Unpaid Only', icon: 'hourglass-outline' },
+                        { value: 'paid', label: 'Paid Only', icon: 'checkmark-done-outline' },
+                        { value: 'overdue', label: 'Overdue (>30 days)', icon: 'alert-circle-outline' },
+                    ].map((option) => (
+                        <TouchableOpacity
+                            key={option.value}
+                            style={[
+                                styles.filterChip,
+                                filters.type === option.value && styles.filterChipActive
+                            ]}
+                            onPress={() => setFilters({ ...filters, type: option.value as FilterType })}
+                        >
+                            <IonIcon
+                                name={option.icon}
+                                size={16}
+                                color={filters.type === option.value ? '#fff' : '#FFA4A4'}
+                            />
+                            <Text style={[
+                                styles.filterChipText,
+                                filters.type === option.value && styles.filterChipTextActive
+                            ]}>
+                                {option.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                {/* Sort By */}
+                <Text style={styles.filterSectionTitle}>Sort By</Text>
+                <View style={styles.filterOptions}>
+                    {[
+                        { value: 'daysDesc', label: 'Days (High to Low)', icon: 'arrow-down' },
+                        { value: 'daysAsc', label: 'Days (Low to High)', icon: 'arrow-up' },
+                        { value: 'amountDesc', label: 'Amount (High to Low)', icon: 'arrow-down' },
+                        { value: 'amountAsc', label: 'Amount (Low to High)', icon: 'arrow-up' },
+                        { value: 'partyAsc', label: 'Party Name (A-Z)', icon: 'arrow-up' },
+                        { value: 'partyDesc', label: 'Party Name (Z-A)', icon: 'arrow-down' },
+                    ].map((option) => (
+                        <TouchableOpacity
+                            key={option.value}
+                            style={[
+                                styles.filterChip,
+                                filters.sort === option.value && styles.filterChipActive
+                            ]}
+                            onPress={() => setFilters({ ...filters, sort: option.value as SortType })}
+                        >
+                            <IonIcon
+                                name={option.icon === 'arrow-up' ? 'arrow-up-outline' : 'arrow-down-outline'}
+                                size={16}
+                                color={filters.sort === option.value ? '#fff' : '#FFA4A4'}
+                            />
+                            <Text style={[
+                                styles.filterChipText,
+                                filters.sort === option.value && styles.filterChipTextActive
+                            ]}>
+                                {option.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                {/* Action Buttons */}
+                <View style={styles.modalActions}>
+                    <TouchableOpacity
+                        style={styles.clearButton}
+                        onPress={clearFilters}
+                    >
+                        <Text style={styles.clearButtonText}>Clear All</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.applyButton}
+                        onPress={onClose}
+                    >
+                        <Text style={styles.applyButtonText}>Apply Filters</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </View>
+    </Modal>
+);
 
 const styles = StyleSheet.create({
     container: {

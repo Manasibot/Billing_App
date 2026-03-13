@@ -1,6 +1,5 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
 
 // Your Firebase configuration
 const firebaseConfig = {
@@ -15,5 +14,12 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore
-export const db = getFirestore(app);
+// Initialize Firestore with persistence optimized for React Native
+import { 
+  initializeFirestore, 
+  persistentLocalCache
+} from 'firebase/firestore';
+
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({})
+});
