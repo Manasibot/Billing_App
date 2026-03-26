@@ -396,7 +396,7 @@ const BillListScreen = () => {
                     initialData={editingBill}
                 />
 
-                <FilterModal 
+                <FilterModal
                     visible={filterModalVisible}
                     onClose={() => setFilterModalVisible(false)}
                     filters={filters}
@@ -417,12 +417,12 @@ interface FilterModalProps {
     clearFilters: () => void;
 }
 
-const FilterModal: React.FC<FilterModalProps> = ({ 
-    visible, 
-    onClose, 
-    filters, 
-    setFilters, 
-    clearFilters 
+const FilterModal: React.FC<FilterModalProps> = ({
+    visible,
+    onClose,
+    filters,
+    setFilters,
+    clearFilters
 }) => (
     <Modal
         animationType="slide"

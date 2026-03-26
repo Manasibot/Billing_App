@@ -41,20 +41,20 @@ const BillItem: React.FC<BillItemProps> = ({ bill, onEdit, onDelete }) => {
             return '—';
         }
     };
-     const calculateDaysCount = () => {
+    const calculateDaysCount = () => {
         if (!bill.billDate) return '—';
-        
+
         try {
             const billDate = bill.billDate?.toDate ? bill.billDate.toDate() : new Date(bill.billDate);
             const today = new Date();
-            
+
             // Reset time part
             billDate.setHours(0, 0, 0, 0);
             today.setHours(0, 0, 0, 0);
-            
+
             const diffTime = today.getTime() - billDate.getTime();
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-            
+
             return diffDays;
         } catch {
             return '—';
