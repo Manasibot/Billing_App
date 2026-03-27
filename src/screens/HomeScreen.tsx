@@ -12,6 +12,8 @@ import { db } from '../firebase';
 import { Bill } from '../types';
 import SyncIndicator from '../components/SyncIndicator';
 import { syncManager } from '../SyncManager';
+import { cacheManager } from '../CacheManager';
+import { enrichBill } from '../utils';
 
 const HomeScreen = () => {
   const [totalPending, setTotalPending] = useState(0);
@@ -20,37 +22,63 @@ const HomeScreen = () => {
   const [overdueCount, setOverdueCount] = useState(0);
   const isDarkMode = useColorScheme() === 'dark';
 
+  const updateStats = (bills: Bill[]) => {
+    let pendingSum = 0;
+    let count = 0;
+    let overdue = 0;
+
+    bills.forEach((bill) => {
+      // Only add pending amount if it's positive
+      if (bill.pendingAmount && bill.pendingAmount > 0) {
+        pendingSum += bill.pendingAmount;
+        count++;
+
+        // Check if bill is overdue (pending amount > 0 and daysCount > 0)
+        if (bill.daysCount && bill.daysCount > 0) {
+          overdue++;
+        }
+      }
+    });
+
+    setTotalPending(pendingSum);
+    setBillCount(count);
+    setOverdueCount(overdue);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    const loadCache = async () => {
+      const cachedBills = await cacheManager.getCachedBills();
+      if (cachedBills.length > 0) {
+        updateStats(cachedBills);
+      }
+    };
+    loadCache();
+  }, []);
+
   useEffect(() => {
     const unsubscribe = onSnapshot(
       collection(db, 'bills'),
       (querySnapshot) => {
         const billsMap = new Map<string, Bill>();
-        let pendingSum = 0;
-        let count = 0;
-        let overdue = 0;
 
         querySnapshot.forEach((docSnap) => {
-          const bill = { id: docSnap.id, ...docSnap.data() } as Bill;
+          const bill = enrichBill(docSnap.id, docSnap.data());
           billsMap.set(docSnap.id, bill);
         });
 
-        billsMap.forEach((bill) => {
-          // Only add pending amount if it's positive
-          if (bill.pendingAmount && bill.pendingAmount > 0) {
-            pendingSum += bill.pendingAmount;
-            count++;
+        const billsArray = Array.from(billsMap.values());
+        const isOffline = syncManager.getStatus() === 'offline';
 
-            // Check if bill is overdue (pending amount > 0 and daysCount > 0)
-            if (bill.daysCount && bill.daysCount > 0) {
-              overdue++;
-            }
+        // Only update UI if we have data or if we are online (meaning it's a real empty state)
+        if (billsArray.length > 0 || !isOffline) {
+          updateStats(billsArray);
+
+          // Save to cache only if we have data to prevent overwriting with empty on failure
+          if (billsArray.length > 0) {
+            cacheManager.saveBills(billsArray);
           }
-        });
-
-        setTotalPending(pendingSum);
-        setBillCount(count);
-        setOverdueCount(overdue);
-        setLoading(false);
+        }
 
         // Track pending writes for sync status
         const hasPending = querySnapshot.metadata.hasPendingWrites;

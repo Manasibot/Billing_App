@@ -13,6 +13,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { Bill } from '../types';
 import { format } from 'date-fns';
+import { coerceDate } from '../utils';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -36,7 +37,7 @@ const BillItem: React.FC<BillItemProps> = ({ bill, isExpanded, onToggle, onEdit,
 
     const formatDate = (dateVal: any) => {
         try {
-            const d = dateVal?.toDate ? dateVal.toDate() : new Date(dateVal);
+            const d = coerceDate(dateVal);
             return format(d, 'dd MMM yy');
         } catch {
             return '—';
@@ -46,9 +47,9 @@ const BillItem: React.FC<BillItemProps> = ({ bill, isExpanded, onToggle, onEdit,
         if (!bill.billDate) return '—';
 
         try {
-            const billDate = bill.billDate?.toDate ? bill.billDate.toDate() : new Date(bill.billDate);
+            const billDate = coerceDate(bill.billDate);
             const endDate = bill.fullyPaidDate 
-                ? (bill.fullyPaidDate?.toDate ? bill.fullyPaidDate.toDate() : new Date(bill.fullyPaidDate))
+                ? coerceDate(bill.fullyPaidDate)
                 : new Date();
 
             // Reset time part for accurate day calculation

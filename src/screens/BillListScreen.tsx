@@ -20,6 +20,8 @@ import { Bill } from '../types';
 import LinearGradient from 'react-native-linear-gradient';
 import SyncIndicator from '../components/SyncIndicator';
 import { syncManager } from '../SyncManager';
+import { cacheManager } from '../CacheManager';
+import { enrichBill } from '../utils';
 
 // Icon imports as specified
 import IonIcon from 'react-native-vector-icons/Ionicons';
@@ -36,28 +38,6 @@ interface FilterState {
     minAmount: number | null;
     maxAmount: number | null;
 }
-
-const calculateDaysCount = (bill: any): number => {
-    if (!bill?.billDate) return 0;
-
-    try {
-        const billDate = bill.billDate?.toDate ? bill.billDate.toDate() : new Date(bill.billDate);
-        const endDate = bill.fullyPaidDate
-            ? (bill.fullyPaidDate?.toDate ? bill.fullyPaidDate.toDate() : new Date(bill.fullyPaidDate))
-            : new Date();
-
-        billDate.setHours(0, 0, 0, 0);
-        endDate.setHours(0, 0, 0, 0);
-
-        const diffTime = endDate.getTime() - billDate.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        return diffDays > 0 ? diffDays : 0;
-    } catch (error) {
-        console.error('Error calculating days count:', error);
-        return 0;
-    }
-};
 
 // Check if bill is overdue (more than 30 days)
 const isOverdue = (daysCount: number): boolean => {
@@ -155,6 +135,17 @@ const BillListScreen = () => {
     }, []);
 
     useEffect(() => {
+        const loadCache = async () => {
+            const cachedBills = await cacheManager.getCachedBills();
+            if (cachedBills.length > 0) {
+                setBills(cachedBills);
+                setLoading(false);
+            }
+        };
+        loadCache();
+    }, []);
+
+    useEffect(() => {
         const q = query(collection(db, 'bills'), orderBy('createdAt', 'desc'));
 
         const unsubscribe = onSnapshot(
@@ -164,18 +155,23 @@ const BillListScreen = () => {
                 const billsMap = new Map<string, Bill>();
 
                 querySnapshot.forEach((docSnap) => {
-                    const data = docSnap.data();
-                    const daysCount = calculateDaysCount(data);
-
-                    billsMap.set(docSnap.id, {
-                        id: docSnap.id,
-                        ...data,
-                        daysCount
-                    } as Bill);
+                    const bill = enrichBill(docSnap.id, docSnap.data());
+                    billsMap.set(docSnap.id, bill);
                 });
 
-                setBills(Array.from(billsMap.values()));
-                setLoading(false);
+                const billsArray = Array.from(billsMap.values());
+                const isOffline = syncManager.getStatus() === 'offline';
+
+                // Only update UI if we have data or if we are online (meaning it's a real empty state)
+                if (billsArray.length > 0 || !isOffline) {
+                    setBills(billsArray);
+                    setLoading(false);
+
+                    // Save to cache only if we have data to prevent overwriting with empty on failure
+                    if (billsArray.length > 0) {
+                        cacheManager.saveBills(billsArray);
+                    }
+                }
 
                 // Track pending writes
                 const hasPending = querySnapshot.metadata.hasPendingWrites;
