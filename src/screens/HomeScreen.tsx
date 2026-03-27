@@ -10,6 +10,8 @@ import LinearGradient from 'react-native-linear-gradient';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Bill } from '../types';
+import SyncIndicator from '../components/SyncIndicator';
+import { syncManager } from '../SyncManager';
 
 const HomeScreen = () => {
   const [totalPending, setTotalPending] = useState(0);
@@ -22,13 +24,17 @@ const HomeScreen = () => {
     const unsubscribe = onSnapshot(
       collection(db, 'bills'),
       (querySnapshot) => {
+        const billsMap = new Map<string, Bill>();
         let pendingSum = 0;
         let count = 0;
         let overdue = 0;
 
         querySnapshot.forEach((docSnap) => {
           const bill = { id: docSnap.id, ...docSnap.data() } as Bill;
+          billsMap.set(docSnap.id, bill);
+        });
 
+        billsMap.forEach((bill) => {
           // Only add pending amount if it's positive
           if (bill.pendingAmount && bill.pendingAmount > 0) {
             pendingSum += bill.pendingAmount;
@@ -45,6 +51,10 @@ const HomeScreen = () => {
         setBillCount(count);
         setOverdueCount(overdue);
         setLoading(false);
+
+        // Track pending writes for sync status
+        const hasPending = querySnapshot.metadata.hasPendingWrites;
+        syncManager.setPendingWrites(hasPending);
       },
       (error) => {
         console.error('Error fetching bills for home screen: ', error);
@@ -79,6 +89,8 @@ const HomeScreen = () => {
           <Text style={styles.totalLabel}>Total Pending Amount</Text>
           <Text style={styles.totalAmount}>{formattedTotal}</Text>
         </View>
+
+        <SyncIndicator />
 
         {/* Stats Row */}
         {/* <View style={styles.statsContainer}>

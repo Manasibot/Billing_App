@@ -20,17 +20,18 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 interface BillItemProps {
     bill: Bill;
+    isExpanded: boolean;
+    onToggle: () => void;
     onEdit: (bill: Bill) => void;
     onDelete: (billId: string) => void;
 }
 
-const BillItem: React.FC<BillItemProps> = ({ bill, onEdit, onDelete }) => {
-    const [expanded, setExpanded] = useState(false);
+const BillItem: React.FC<BillItemProps> = ({ bill, isExpanded, onToggle, onEdit, onDelete }) => {
     const isPaid = bill.pendingAmount <= 0;
 
     const toggleExpand = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setExpanded(prev => !prev);
+        onToggle();
     };
 
     const formatDate = (dateVal: any) => {
@@ -46,16 +47,18 @@ const BillItem: React.FC<BillItemProps> = ({ bill, onEdit, onDelete }) => {
 
         try {
             const billDate = bill.billDate?.toDate ? bill.billDate.toDate() : new Date(bill.billDate);
-            const today = new Date();
+            const endDate = bill.fullyPaidDate 
+                ? (bill.fullyPaidDate?.toDate ? bill.fullyPaidDate.toDate() : new Date(bill.fullyPaidDate))
+                : new Date();
 
-            // Reset time part
+            // Reset time part for accurate day calculation
             billDate.setHours(0, 0, 0, 0);
-            today.setHours(0, 0, 0, 0);
+            endDate.setHours(0, 0, 0, 0);
 
-            const diffTime = today.getTime() - billDate.getTime();
+            const diffTime = endDate.getTime() - billDate.getTime();
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-            return diffDays;
+            return diffDays > 0 ? diffDays : 0;
         } catch {
             return '—';
         }
@@ -98,7 +101,7 @@ const BillItem: React.FC<BillItemProps> = ({ bill, onEdit, onDelete }) => {
                         {isPaid ? '✓ Paid' : `₹${formatAmount(bill.pendingAmount)}`}
                     </Text>
                     <Icon
-                        name={expanded ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
+                        name={isExpanded ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
                         size={20}
                         color="#999"
                     />
@@ -106,7 +109,7 @@ const BillItem: React.FC<BillItemProps> = ({ bill, onEdit, onDelete }) => {
             </TouchableOpacity>
 
             {/* ── Expanded Detail Panel ── */}
-            {expanded && (
+            {isExpanded && (
                 <View style={styles.expandedPanel}>
                     <View style={styles.divider} />
 

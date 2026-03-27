@@ -9,13 +9,17 @@ import {
     Text,
     StatusBar,
     Modal,
+    AppState,
 } from 'react-native';
-import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, Timestamp } from 'firebase/firestore';
+import { useIsFocused } from '@react-navigation/native';
+import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, deleteDoc, doc, Timestamp, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import BillItem from '../components/BillItem';
 import AddBillModal from '../components/AddBillModal';
 import { Bill } from '../types';
 import LinearGradient from 'react-native-linear-gradient';
+import SyncIndicator from '../components/SyncIndicator';
+import { syncManager } from '../SyncManager';
 
 // Icon imports as specified
 import IonIcon from 'react-native-vector-icons/Ionicons';
@@ -33,18 +37,19 @@ interface FilterState {
     maxAmount: number | null;
 }
 
-// Helper function to calculate days count
-const calculateDaysCount = (billDate: any): number => {
-    if (!billDate) return 0;
+const calculateDaysCount = (bill: any): number => {
+    if (!bill?.billDate) return 0;
 
     try {
-        const date = billDate?.toDate ? billDate.toDate() : new Date(billDate);
-        const today = new Date();
+        const billDate = bill.billDate?.toDate ? bill.billDate.toDate() : new Date(bill.billDate);
+        const endDate = bill.fullyPaidDate
+            ? (bill.fullyPaidDate?.toDate ? bill.fullyPaidDate.toDate() : new Date(bill.fullyPaidDate))
+            : new Date();
 
-        date.setHours(0, 0, 0, 0);
-        today.setHours(0, 0, 0, 0);
+        billDate.setHours(0, 0, 0, 0);
+        endDate.setHours(0, 0, 0, 0);
 
-        const diffTime = today.getTime() - date.getTime();
+        const diffTime = endDate.getTime() - billDate.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
         return diffDays > 0 ? diffDays : 0;
@@ -122,6 +127,8 @@ const BillListScreen = () => {
     const [modalVisible, setModalVisible] = useState(false);
     const [filterModalVisible, setFilterModalVisible] = useState(false);
     const [editingBill, setEditingBill] = useState<Bill | null>(null);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const isFocused = useIsFocused();
 
     // Filter state
     const [filters, setFilters] = useState<FilterState>({
@@ -132,31 +139,50 @@ const BillListScreen = () => {
     });
 
     useEffect(() => {
+        if (!isFocused) {
+            setExpandedId(null);
+        }
+    }, [isFocused]);
+
+    useEffect(() => {
+        const subscription = AppState.addEventListener('change', nextAppState => {
+            if (nextAppState === 'background' || nextAppState === 'inactive') {
+                setExpandedId(null);
+            }
+        });
+
+        return () => subscription.remove();
+    }, []);
+
+    useEffect(() => {
         const q = query(collection(db, 'bills'), orderBy('createdAt', 'desc'));
-        // Added includeMetadataChanges to ensure local writes are visible immediately
+
         const unsubscribe = onSnapshot(
             q,
             { includeMetadataChanges: true },
             (querySnapshot) => {
-                const billsData: Bill[] = [];
+                const billsMap = new Map<string, Bill>();
 
                 querySnapshot.forEach((docSnap) => {
                     const data = docSnap.data();
-                    const daysCount = calculateDaysCount(data.billDate);
+                    const daysCount = calculateDaysCount(data);
 
-                    billsData.push({
+                    billsMap.set(docSnap.id, {
                         id: docSnap.id,
                         ...data,
                         daysCount
                     } as Bill);
                 });
 
-                setBills(billsData);
+                setBills(Array.from(billsMap.values()));
                 setLoading(false);
+
+                // Track pending writes
+                const hasPending = querySnapshot.metadata.hasPendingWrites;
+                syncManager.setPendingWrites(hasPending);
             },
             (error) => {
                 console.error('Error fetching bills: ', error);
-                Alert.alert('Error', 'Failed to fetch bills');
                 setLoading(false);
             }
         );
@@ -233,28 +259,62 @@ const BillListScreen = () => {
     }, [bills, filters]);
 
     const handleAddBill = async (billData: Omit<Bill, 'id'>) => {
+        const isOffline = syncManager.getStatus() === 'offline';
+        // Generate a unique ID on the client to prevent duplicates during sync
+        const newBillRef = doc(collection(db, 'bills'));
+        const billId = newBillRef.id;
+        
+        console.log(`[BillListScreen] Adding Bill: "${billData.partyName}" - ID: ${billId} (${isOffline ? 'OFFLINE QUEUED' : 'ONLINE'})`);
+
         try {
-            await addDoc(collection(db, 'bills'), {
+            if (isOffline) {
+                // Queue for background sync/app restart
+                await syncManager.queueOperation({
+                    type: 'add',
+                    collection: 'bills',
+                    data: { ...billData, id: billId } // Include the unique ID
+                });
+            }
+
+            // Always try Firestore (updates UI immediately via memory cache even if offline)
+            syncManager.setPendingWrites(true);
+            await setDoc(newBillRef, {
                 ...billData,
                 createdAt: Timestamp.now(),
                 updatedAt: Timestamp.now(),
             });
+            console.log(`[BillListScreen] Bill Added to Firestore Local: "${billData.partyName}" with ID: ${billId}`);
         } catch (e) {
-            console.error('Error adding bill: ', e);
+            syncManager.setPendingWrites(false);
+            console.error('[BillListScreen] Error adding bill: ', e);
             Alert.alert('Error', 'Failed to save bill');
         }
     };
 
     const handleUpdateBill = async (billData: Omit<Bill, 'id'>) => {
         if (!editingBill?.id) return;
+        const isOffline = syncManager.getStatus() === 'offline';
+        console.log(`[BillListScreen] Updating Bill: ID ${editingBill.id} (${isOffline ? 'OFFLINE QUEUED' : 'ONLINE'})`);
+
         try {
-            const billRef = doc(db, 'bills', editingBill.id);
-            await updateDoc(billRef, {
+            if (isOffline) {
+                await syncManager.queueOperation({
+                    type: 'update',
+                    collection: 'bills',
+                    targetId: editingBill.id,
+                    data: billData
+                });
+            }
+
+            syncManager.setPendingWrites(true);
+            await updateDoc(doc(db, 'bills', editingBill.id), {
                 ...billData,
                 updatedAt: Timestamp.now(),
             });
+            console.log(`[BillListScreen] Bill Updated in Firestore Local: ID ${editingBill.id}`);
         } catch (e) {
-            console.error('Error updating bill: ', e);
+            syncManager.setPendingWrites(false);
+            console.error('[BillListScreen] Error updating bill: ', e);
             Alert.alert('Error', 'Failed to update bill');
         }
     };
@@ -275,15 +335,30 @@ const BillListScreen = () => {
     };
 
     const handleDelete = async (billId: string) => {
+        const isOffline = syncManager.getStatus() === 'offline';
+        console.log(`[BillListScreen] Deleting Bill: ID ${billId} (${isOffline ? 'OFFLINE QUEUED' : 'ONLINE'})`);
+
         try {
+            if (isOffline) {
+                await syncManager.queueOperation({
+                    type: 'delete',
+                    collection: 'bills',
+                    targetId: billId
+                });
+            }
+
+            syncManager.setPendingWrites(true);
             await deleteDoc(doc(db, 'bills', billId));
+            console.log(`[BillListScreen] Bill Deleted in Firestore Local: ID ${billId}`);
         } catch (e) {
-            console.error('Error deleting bill: ', e);
+            syncManager.setPendingWrites(false);
+            console.error('[BillListScreen] Error deleting bill: ', e);
             Alert.alert('Error', 'Failed to delete bill');
         }
     };
 
     const openEditModal = (bill: Bill) => {
+        setExpandedId(null);
         setEditingBill(bill);
         setModalVisible(true);
     };
@@ -320,7 +395,10 @@ const BillListScreen = () => {
             <LinearGradient colors={['#FCF9EA', '#BADFDB']} style={styles.container}>
                 {/* Header */}
                 <View style={styles.header}>
-                    <Text style={styles.headerTitle}>My Bills</Text>
+                    <View>
+                        <Text style={styles.headerTitle}>My Bills</Text>
+                        <SyncIndicator />
+                    </View>
                     <TouchableOpacity
                         onPress={() => setFilterModalVisible(true)}
                         style={styles.filterButton}
@@ -364,7 +442,13 @@ const BillListScreen = () => {
                     data={filteredBills}
                     keyExtractor={(item) => item.id || Math.random().toString()}
                     renderItem={({ item }) => (
-                        <BillItem bill={item} onEdit={openEditModal} onDelete={confirmDelete} />
+                        <BillItem
+                            bill={item}
+                            isExpanded={expandedId === item.id}
+                            onToggle={() => setExpandedId(expandedId === item.id ? null : (item.id || null))}
+                            onEdit={openEditModal}
+                            onDelete={confirmDelete}
+                        />
                     )}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
@@ -381,6 +465,7 @@ const BillListScreen = () => {
                 <TouchableOpacity
                     style={styles.fab}
                     onPress={() => {
+                        setExpandedId(null);
                         setEditingBill(null);
                         setModalVisible(true);
                     }}

@@ -1,5 +1,11 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from 'firebase/app';
+import { 
+  initializeFirestore, 
+  persistentLocalCache,
+  Timestamp,
+  FieldValue
+} from 'firebase/firestore';
 
 // Your Firebase configuration
 const firebaseConfig = {
@@ -14,12 +20,11 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with persistence optimized for React Native
-import { 
-  initializeFirestore, 
-  persistentLocalCache
-} from 'firebase/firestore';
-
+// Initialize Firestore
+// Note: persistence is disabled by default in JS SDK in React Native (no IndexedDB)
+// We use AsyncStorage to handle offline queuing manually.
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({})
 });
+
+export { Timestamp, FieldValue };
