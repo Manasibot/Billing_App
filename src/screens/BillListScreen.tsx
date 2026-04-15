@@ -259,7 +259,7 @@ const BillListScreen = () => {
         // Generate a unique ID on the client to prevent duplicates during sync
         const newBillRef = doc(collection(db, 'bills'));
         const billId = newBillRef.id;
-        
+
         console.log(`[BillListScreen] Adding Bill: "${billData.partyName}" - ID: ${billId} (${isOffline ? 'OFFLINE QUEUED' : 'ONLINE'})`);
 
         try {
@@ -444,6 +444,7 @@ const BillListScreen = () => {
                             onToggle={() => setExpandedId(expandedId === item.id ? null : (item.id || null))}
                             onEdit={openEditModal}
                             onDelete={confirmDelete}
+                            onUpdateBill={handleUpdateBill}
                         />
                     )}
                     contentContainerStyle={styles.listContent}

@@ -8,12 +8,15 @@ import {
     LayoutAnimation,
     UIManager,
     Platform,
+    TextInput,Alert,
+    Modal
 } from 'react-native';
 // @ts-ignore
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { Bill } from '../types';
+import { Bill,Installment } from '../types';
 import { format } from 'date-fns';
 import { coerceDate } from '../utils';
+import { Calendar } from 'react-native-calendars';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -25,15 +28,69 @@ interface BillItemProps {
     onToggle: () => void;
     onEdit: (bill: Bill) => void;
     onDelete: (billId: string) => void;
+    onUpdateBill: (updatedBill: Bill) => void; // Add this new prop
 }
 
-const BillItem: React.FC<BillItemProps> = ({ bill, isExpanded, onToggle, onEdit, onDelete }) => {
+const BillItem: React.FC<BillItemProps> = ({  bill, 
+    isExpanded, 
+    onToggle, 
+    onEdit, 
+    onDelete,
+    onUpdateBill }) => {
+    //  const [partyName, setPartyName] = useState('');
+    //     const [billNo, setBillNo] = useState('');
+    //     const [billDate, setBillDate] = useState(new Date());
+    //     const [billAmount, setBillAmount] = useState('');
+    //     const [goodsReturn, setGoodsReturn] = useState('0');
+    //     const [installments, setInstallments] = useState<Installment[]>([]);
+        // const [showAddInstallment, setShowAddInstallment] = useState(false);
+    
+    
+        const [showGoodsReturn, setShowGoodsReturn] = useState(false);
+     const [instAmount, setInstAmount] = useState('');
+        const [instDate, setInstDate] = useState(new Date());
+        const [showBillDatePicker, setShowBillDatePicker] = useState(false);
+        const [showInstDatePicker, setShowInstDatePicker] = useState(false);
     const isPaid = bill.pendingAmount <= 0;
+    const [showAddInstallment, setShowAddInstallment] = useState(false);
 
     const toggleExpand = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         onToggle();
     };
+const addInstallment = () => {
+    const amount = parseFloat(instAmount);
+    if (isNaN(amount) || amount <= 0) {
+        Alert.alert('Invalid Amount', 'Please enter a valid installment amount');
+        return;
+    }
+
+    // Create updated bill with new installment
+    const updatedInstallments = [...(bill.installments || []), { amount, date: instDate }];
+    
+    // Recalculate totals
+    const totalInst = updatedInstallments.reduce((sum, i) => sum + i.amount, 0);
+    const gr = bill.goodsReturn || 0;
+    const totalPaid = totalInst + gr;
+    const amount_bill = bill.billAmount;
+    const pending = amount_bill - totalPaid;
+    
+    const updatedBill: Bill = {
+        ...bill,
+        installments: updatedInstallments,
+        totalPaidAmount: totalPaid,
+        pendingAmount: pending < 0 ? 0 : pending,
+        fullyPaidDate: pending <= 0 ? new Date() : bill.fullyPaidDate,
+    };
+    
+    // Call the parent's update function
+    onUpdateBill(updatedBill);
+    
+    // Reset form
+    setInstAmount('');
+    setInstDate(new Date());
+    setShowAddInstallment(false);
+};
 
     const formatDate = (dateVal: any) => {
         try {
@@ -48,7 +105,7 @@ const BillItem: React.FC<BillItemProps> = ({ bill, isExpanded, onToggle, onEdit,
 
         try {
             const billDate = coerceDate(bill.billDate);
-            const endDate = bill.fullyPaidDate 
+            const endDate = bill.fullyPaidDate
                 ? coerceDate(bill.fullyPaidDate)
                 : new Date();
 
@@ -130,10 +187,76 @@ const BillItem: React.FC<BillItemProps> = ({ bill, isExpanded, onToggle, onEdit,
                         )}
                     </View>
 
+                    <View style={styles.instHeaderRow}>
+                        <Text style={styles.instHeader}>Installments</Text>
+
+                        <TouchableOpacity onPress={() => setShowAddInstallment(!showAddInstallment)} style={{ marginLeft: 4 }}>
+                            <Icon
+                                name={showAddInstallment ? 'remove-circle-outline' : 'add-circle-outline'}
+                                size={22}
+                                color="#FFA4A4"
+                            />
+                        </TouchableOpacity>
+                    </View>
+                    {showAddInstallment && (
+                        <View style={styles.addInstContainer}>
+                            <TextInput
+                                style={[styles.input, { flex: 1, marginBottom: 0, marginRight: 8 }]}
+                                value={instAmount}
+                                onChangeText={setInstAmount}
+                                placeholder="Amount"
+                                keyboardType="numeric"
+                                placeholderTextColor="#BADFDB"
+                            />
+
+                            <TouchableOpacity onPress={() => setShowInstDatePicker(true)} style={styles.iconBtn}>
+                                <Icon name="event" size={24} color="#FFA4A4" />
+                            </TouchableOpacity>
+                               <Modal
+                            visible={showInstDatePicker}
+                            transparent={true}
+                            animationType="fade"
+                            onRequestClose={() => setShowInstDatePicker(false)}
+                         >
+                            <View style={styles.calendarModalOverlay}>
+                                <View style={styles.calendarContainer}>
+                                    <Calendar
+                                        onDayPress={(day: any) => {
+                                            setInstDate(new Date(day.timestamp));
+                                            setShowInstDatePicker(false);
+                                        }}
+                                        markedDates={{
+                                            [format(instDate, 'yyyy-MM-dd')]: { selected: true, selectedColor: '#FFA4A4' }
+                                        }}
+                                        theme={{
+                                            todayTextColor: '#FFA4A4',
+                                            arrowColor: '#FFA4A4',
+                                            selectedDayBackgroundColor: '#FFA4A4',
+                                        }}
+                                    />
+                                    <TouchableOpacity
+                                        style={styles.closeCalendarBtn}
+                                        onPress={() => setShowInstDatePicker(false)}
+                                    >
+                                        <Text style={styles.closeCalendarBtnText}>Close</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Modal>
+
+                            {/* Your modal stays same */}
+
+                            <TouchableOpacity onPress={addInstallment} style={[styles.btn, { marginLeft: 8 }]}>
+                                <Text style={styles.btnText}>Add</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+
                     {/* Installments */}
                     {bill.installments && bill.installments.length > 0 && (
                         <View style={styles.installmentsSection}>
-                            <Text style={styles.instHeader}>Installments</Text>
+                            {/* <Text style={styles.instHeader}>Installments</Text> */}
                             {/* Table header */}
                             <View style={styles.instTableHeader}>
                                 <Text style={[styles.instHeaderCell, { flex: 1 }]}>#</Text>
@@ -309,6 +432,12 @@ const styles = StyleSheet.create({
     installmentsSection: {
         marginBottom: 10,
     },
+    instHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+    },
+
     instHeader: {
         fontSize: 13,
         fontWeight: '700',
@@ -374,6 +503,69 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 13,
         fontWeight: '600',
+    },
+      addInstContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 3,
+        marginBottom:5
+    },
+        input: {
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: '#BADFDB', // Mint border
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 16,
+        fontSize: 16,
+        color: '#333',
+    },
+       btnText: {
+        color: '#FCF9EA',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+      iconBtn: {
+        padding: 10,
+        backgroundColor: '#FCF9EA',
+        borderWidth: 1,
+        borderColor: '#BADFDB',
+        borderRadius: 8,
+    },
+      btn: {
+        backgroundColor: '#FFA4A4',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        borderRadius: 8,
+    },
+      calendarModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0,5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    calendarContainer: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 12,
+        padding: 10,
+        width: '100%',
+        elevation: 5,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+    },
+    closeCalendarBtn: {
+        marginTop: 10,
+        backgroundColor: '#FFA4A4',
+        padding: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    closeCalendarBtnText: {
+        color: '#FFFFFF',
+        fontWeight: 'bold',
     },
 });
 
